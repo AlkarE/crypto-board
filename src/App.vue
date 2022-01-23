@@ -108,7 +108,7 @@
       </div>
       <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
         <div
-          v-for="t of filteredTickers()"
+          v-for="t of filteredTickers"
           :key="t.id"
           class="bg-white overflow-hidden shadow rounded-lg border-purple-800 border-solid cursor-pointer"
           :class="selected === t ? 'border-4' : ''"
@@ -152,7 +152,7 @@
           </h3>
           <div class="flex items-end border-gray-600 border-b border-l h-64">
             <div
-              v-for="(d, index) in normalized()"
+              v-for="(d, index) in normalized"
               :key="index"
               class="bg-purple-800 border w-10"
               :style="{ height: d + '%' }"
@@ -208,28 +208,49 @@ export default {
       notice: false,
       filter: '',
       page: 1,
-      hasNextPage: true,
     }
   },
   list: [],
   timer: null,
-  methods: {
-    filteredTickers() {
-      // 1 -- 0, 5
-      // 2 -- 6, 11
-      const start = 6 * (this.page - 1)
-      const end = 6 * this.page
-      let filter = this.filter.toUpperCase()
-      let filtered = this.tickers.filter((t) => t.name.includes(filter))
-      if (filtered.length > 6 * this.page) {
-        this.hasNextPage = true
-      } else {
-        this.hasNextPage = false
-      }
-      return filtered.slice(start, end)
+  computed: {
+    startIndex() {
+      return 6 * (this.page - 1)
     },
+    endindex() {
+      return 6 * this.page
+    },
+    filtered() {
+      return this.tickers.filter((t) =>
+        t.name.includes(this.filter.toUpperCase())
+      )
+    },
+    filteredTickers() {
+      return this.filtered.slice(this.startIndex, this.endindex)
+    },
+    hasNextPage() {
+      return this.filtered.length > this.endindex
+    },
+    normalized() {
+      let min = Math.min(...this.graph)
+      let max = Math.max(...this.graph)
+      const newMin = 5
+      const newMax = 100
+      if (min === max) max = max + newMax
+      return this.graph.map((x) => {
+        if (min === max) return x.toPrecision(2)
+        let v = newMin + ((x - min) * (newMax - newMin)) / (max - min)
+        return v.toPrecision(2)
+      })
+    },
+    pageStateOptions() {
+      return {
+        page: this.page,
+        filter: this.filter,
+      }
+    },
+  },
+  methods: {
     onNextPage() {
-      log(this.filteredTickers().length)
       if (this.hasNextPage) this.page++
     },
     onPrevPage() {
@@ -237,15 +258,12 @@ export default {
         this.page -= 1
       }
     },
+    isTickerExists(ticker) {
+      return this.tickers.find((t) => t.name === ticker.name).length > 0
+    },
 
     async placeTicker(ticker) {
-      let exists = false
-      this.tickers.forEach((t) => {
-        if (t.name === ticker.name) {
-          exists = true
-        }
-      })
-      if (!exists) {
+      if (!this.isTickerExists(ticker)) {
         let price = await this.getCurrency(ticker.name)
         ticker.price = price.USD
         this.ticker = ''
@@ -265,7 +283,6 @@ export default {
       currency.price = data.USD
       this.ticker = ''
       this.tickers.push(currency)
-      this.saveData()
     },
     async getCurrency(currency) {
       const apiKey =
@@ -291,24 +308,14 @@ export default {
     //      return newMin + (val - minVal) * (newMax - newMin) / (maxVal - minVal);
     //    };
     // (value - min) * 100 / (max - min)
-    normalized() {
-      if (this.graph.length < 2) return
-      let min = Math.min(...this.graph)
-      let max = Math.max(...this.graph)
-      const newMin = 5
-      const newMax = 100
-      if (min === max) max = max + newMax
-      return this.graph.map((x) => {
-        if (min === max) return x
-        let v = newMin + ((x - min) * (newMax - newMin)) / (max - min)
-        return v
-      })
-    },
+
+    // оценить важность проблем приложения
+
     fillGraph(id) {
       let ticker = this.tickers.find((t) => t.id === id)
+
       let get = this.getCurrency
       let d
-
       this.$options.timer = setInterval(async () => {
         d = await get(ticker.name)
         this.graph.push(d['USD'])
@@ -354,26 +361,24 @@ export default {
       }
     },
   },
-  // const state = { 'page_id': 1, 'user_id': 5 }
-  // const title = ''
-  // const url = 'hello-world.html'
-
-  // history.pushState(state, title, url)
 
   watch: {
+    tickers() {
+      this.saveData()
+    },
+    filteredTickers() {
+      if (this.filteredTickers.length === 0 && this.page > 1) {
+        this.page -= 1
+      }
+    },
     filter() {
       this.page = 1
-      window.history.pushState(
-        null,
-        document.title,
-        `?filter=${this.filter}&page=${this.page}`
-      )
     },
-    page() {
+    pageStateOptions(v) {
       window.history.pushState(
         null,
         document.title,
-        `?filter=${this.filter}&page=${this.page}`
+        `?filter=${v.filter}&page=${v.page}`
       )
     },
   },
@@ -384,12 +389,9 @@ export default {
     const windowData = Object.fromEntries(
       new URL(window.location).searchParams.entries()
     )
-    if (windowData.filter) {
-      this.filter = windowData.filter
-    }
-    if (windowData.page) {
-      this.page = windowData.page
-    }
+
+    windowData.filter && (this.filter = windowData.filter)
+    windowData.page && (this.page = windowData.page)
   },
 }
 </script>
