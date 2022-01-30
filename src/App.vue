@@ -108,7 +108,7 @@
       </div>
       <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
         <div
-          v-for="t of filteredTickers"
+          v-for="t of paginatedTickers"
           :key="t.id"
           class="bg-white overflow-hidden shadow rounded-lg border-purple-800 border-solid cursor-pointer"
           :class="selected === t ? 'border-4' : ''"
@@ -192,6 +192,7 @@
 </template>
 
 <script>
+import { getCurrency } from './api'
 function uid() {
   return Math.random().toString(16).slice(2)
 }
@@ -224,7 +225,7 @@ export default {
         t.name.includes(this.filter.toUpperCase())
       )
     },
-    filteredTickers() {
+    paginatedTickers() {
       return this.filtered.slice(this.startIndex, this.endindex)
     },
     hasNextPage() {
@@ -259,12 +260,14 @@ export default {
       }
     },
     isTickerExists(ticker) {
-      return this.tickers.find((t) => t.name === ticker.name).length > 0
+      let found = this.tickers.find((t) => t.name === ticker.name)
+
+      return found ? true : false
     },
 
     async placeTicker(ticker) {
       if (!this.isTickerExists(ticker)) {
-        let price = await this.getCurrency(ticker.name)
+        let price = await getCurrency(ticker.name)
         ticker.price = price.USD
         this.ticker = ''
         this.tickers.push(ticker)
@@ -273,24 +276,25 @@ export default {
         this.notice = true
       }
     },
-    async addTicker() {
+    addTicker() {
       const currency = {
         id: uid(),
         name: this.ticker.toUpperCase(),
         price: '-',
       }
-      let data = await this.getCurrency(currency.name)
-      currency.price = data.USD
       this.ticker = ''
-      this.tickers.push(currency)
+      this.tickers = [...this.tickers, currency]
     },
-    async getCurrency(currency) {
-      const apiKey =
-        '4d4178e3efd1b7d750ea0da36e54f87cb6ecf00614cc177d9eb9c1dddc4ed216'
-      const url = `https://min-api.cryptocompare.com/data/price?fsym=${currency}&tsyms=USD&api_key=${apiKey}`
-      const r = await fetch(url)
-      return await r.json()
+    updateTickersPrice() {
+      this.$options.timer = setInterval(async () => {
+        const r = await getCurrency(this.tickers)
+        for (let key in r) {
+          let ticker = this.tickers.find((t) => t.name === key)
+          ticker && (ticker.price = r[key])
+        }
+      }, 5000)
     },
+
     handleDelete(id) {
       this.tickers = this.tickers.filter((c) => c.id !== id)
     },
@@ -301,6 +305,7 @@ export default {
     },
     removeSelected() {
       this.selected = null
+      // log(this.$options.timer)
       clearInterval(this.$options.timer)
     },
 
@@ -313,13 +318,15 @@ export default {
 
     fillGraph(id) {
       let ticker = this.tickers.find((t) => t.id === id)
-
-      let get = this.getCurrency
+      if (!ticker) {
+        return
+      }
       let d
       this.$options.timer = setInterval(async () => {
-        d = await get(ticker.name)
+        d = await getCurrency(ticker.name)
         this.graph.push(d['USD'])
       }, 3000)
+      log(this.$options.timer)
     },
     async getList() {
       let r = await fetch(
@@ -364,10 +371,11 @@ export default {
 
   watch: {
     tickers() {
+      this.updateTickersPrice()
       this.saveData()
     },
-    filteredTickers() {
-      if (this.filteredTickers.length === 0 && this.page > 1) {
+    paginatedTickers() {
+      if (this.paginatedTickers.length === 0 && this.page > 1) {
         this.page -= 1
       }
     },
