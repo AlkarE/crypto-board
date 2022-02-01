@@ -403,3 +403,4 @@ export default {
   },
 }
 </script>
+<style src="./assets/app.css"></style>
