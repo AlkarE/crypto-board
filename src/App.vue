@@ -112,9 +112,12 @@
           :key="t.id"
           class="bg-white overflow-hidden shadow rounded-lg border-purple-800 border-solid cursor-pointer"
           :class="selected === t ? 'border-4' : ''"
-          @click="handleSelected(t.id)"
+          @click="handleSelected(t)"
         >
-          <div class="px-4 py-5 sm:p-6 text-center">
+          <div
+            class="px-4 py-5 sm:p-6 text-center"
+            :class="{ 'bg-red-100': !isAlive(t) }"
+          >
             <dt class="text-sm font-medium text-gray-500 truncate">
               {{ t.name }} - USD
             </dt>
@@ -150,7 +153,10 @@
           <h3 class="text-lg leading-6 font-medium text-gray-900 my-8">
             {{ selected.name }} - USD
           </h3>
-          <div class="flex items-end border-gray-600 border-b border-l h-64">
+          <div
+            class="flex items-end border-gray-600 border-b border-l h-64"
+            ref="graphBox"
+          >
             <div
               v-for="(d, index) in normalized"
               :key="index"
@@ -192,11 +198,14 @@
 </template>
 
 <script>
-import { getCurrency } from './api'
+// format price
+// write subscribe
+
+import { subscribeToTicker } from './api'
+import './assets/app.css'
 function uid() {
   return Math.random().toString(16).slice(2)
 }
-const { log } = console
 export default {
   name: 'App',
   components: {},
@@ -206,6 +215,7 @@ export default {
       tickers: [],
       selected: null,
       graph: [],
+      maxGraph: 1,
       notice: false,
       filter: '',
       page: 1,
@@ -213,9 +223,10 @@ export default {
   },
   list: [],
   timer: null,
+  interval: 5 * 60 * 60,
   computed: {
     startIndex() {
-      return 6 * (this.page - 1)
+      return 6 * (this.page > 0 ? this.page - 1 : 0)
     },
     endindex() {
       return 6 * this.page
@@ -251,6 +262,25 @@ export default {
     },
   },
   methods: {
+    isAlive(t) {
+      // const created = t.created
+      // const modified = t.modified
+      // if (now < this.$options.startTime + this.$options.interval) {
+      //   return true
+      // }
+      // return (
+      //   !!t.modified &&
+      //   t.modified > this.$options.startTime + this.$options.interval
+      // )
+      console.log(`ticker to check ${t.name}`)
+      return !!t.created
+    },
+    calcMaxGraphElems() {
+      if (!this.$refs.graphBox) {
+        return
+      }
+      this.maxGraph = this.$refs.graphBox.clientWidth / 38
+    },
     onNextPage() {
       if (this.hasNextPage) this.page++
     },
@@ -265,43 +295,67 @@ export default {
       return found ? true : false
     },
 
-    async placeTicker(ticker) {
-      if (!this.isTickerExists(ticker)) {
-        let price = await getCurrency(ticker.name)
-        ticker.price = price.USD
-        this.ticker = ''
-        this.tickers.push(ticker)
-      } else {
-        this.ticker = ticker.name
-        this.notice = true
-      }
+    async placeTicker() {
+      // if (!this.isTickerExists(ticker)) {
+      //   let price = await getCurrency(ticker.name)
+      //   ticker.price = price.USD
+      //   this.ticker = ''
+      //   this.tickers.push(ticker)
+      // } else {
+      //   this.ticker = ticker.name
+      //   this.notice = true
+      // }
     },
     addTicker() {
       const currency = {
         id: uid(),
         name: this.ticker.toUpperCase(),
         price: '-',
+        created: Date.now(),
+        modified: false,
       }
       this.ticker = ''
+      subscribeToTicker(currency.name, (newPrice) => {
+        this.updateTickersPrice(currency.name, newPrice)
+      })
+      subscribeToTicker(currency.name, () => {
+        const timeStamp = Date.now()
+
+        this.setUpdatedTime(currency.name, timeStamp)
+      })
       this.tickers = [...this.tickers, currency]
     },
-    updateTickersPrice() {
-      this.$options.timer = setInterval(async () => {
-        const r = await getCurrency(this.tickers)
-        for (let key in r) {
-          let ticker = this.tickers.find((t) => t.name === key)
-          ticker && (ticker.price = r[key])
-        }
-      }, 5000)
+    setUpdatedTime(tickerName, timeStamp) {
+      this.tickers
+        .filter((ticker) => tickerName === ticker.name)
+        .forEach((item) => (item.modified = timeStamp))
     },
-
+    updateTickersPrice(tickerName, price) {
+      if (this.selected && this.selected.name === tickerName) {
+        if (this.maxGraph === 1) {
+          this.calcMaxGraphElems()
+        }
+        while (this.graph.length > this.maxGraph) {
+          this.graph.shift()
+        }
+        this.graph.push(price)
+      }
+      this.tickers
+        .filter((t) => t.name === tickerName)
+        .forEach((item) => {
+          item.price = price
+        })
+    },
+    formatPrice(price) {
+      if (price === '-') return price
+      return price > 1 ? price.toFixed(2) : price.toPrecision(2)
+    },
     handleDelete(id) {
       this.tickers = this.tickers.filter((c) => c.id !== id)
     },
-    handleSelected(id) {
-      this.selected = this.tickers.find((t) => t.id === id)
+    handleSelected(t) {
+      this.selected = t
       this.graph = []
-      this.fillGraph(id)
     },
     removeSelected() {
       this.selected = null
@@ -316,24 +370,11 @@ export default {
 
     // оценить важность проблем приложения
 
-    fillGraph(id) {
-      let ticker = this.tickers.find((t) => t.id === id)
-      if (!ticker) {
-        return
-      }
-      let d
-      this.$options.timer = setInterval(async () => {
-        d = await getCurrency(ticker.name)
-        this.graph.push(d['USD'])
-      }, 3000)
-      log(this.$options.timer)
-    },
     async getList() {
       let r = await fetch(
         'https://min-api.cryptocompare.com/data/all/coinlist?summary=true'
       )
       let d = await r.json()
-      log('list')
       this.$options.list = d.Data
     },
     onSearch() {
@@ -365,18 +406,26 @@ export default {
       const data = localStorage.getItem('tickersData')
       if (data) {
         this.tickers = JSON.parse(data)
+        this.tickers.forEach((t) =>
+          subscribeToTicker(t.name, (newPrice) => {
+            let timeStamp = Date.now()
+            this.updateTickersPrice(t.name, newPrice)
+            this.setUpdatedTime(t.name, timeStamp)
+          })
+        )
       }
     },
   },
 
   watch: {
     tickers() {
-      this.updateTickersPrice()
+      // this.updateTickersPrice()
       this.saveData()
     },
     paginatedTickers() {
-      if (this.paginatedTickers.length === 0 && this.page > 1) {
-        this.page -= 1
+      if (this.paginatedTickers.length === 0 && this.page >= 1) {
+        // this.page -= 1
+        console.log('paginating')
       }
     },
     filter() {
@@ -401,6 +450,13 @@ export default {
     windowData.filter && (this.filter = windowData.filter)
     windowData.page && (this.page = windowData.page)
   },
+  mounted() {
+    window.addEventListener('resize', this.calcMaxGraphElems)
+  },
 }
 </script>
-<style src="./assets/app.css"></style>
+<style>
+.bg-red-100 {
+  background-color: rgba(255, 0, 0, 0.15);
+}
+</style>
